@@ -14,6 +14,7 @@ extern void createaliastables(void);
 extern void createreswdtable(void);
 extern void initlextabs(void);
 extern void init_parse(void);
+extern void inittyptab(void);
 
 // ZLE initialization functions
 extern void init_thingies(void);
@@ -25,7 +26,6 @@ extern void hbegin(int);
 // Global variables we need to initialize
 extern unsigned char *cmdstack;
 extern int cmdsp;
-extern int strin;
 extern int fdtable_size;
 extern unsigned char *fdtable;
 
@@ -64,14 +64,9 @@ bool initializeLibzsh(const InitOptions& options) {
     // Initialize job control structures
     init_jobs(g_fake_argv, g_fake_envp);
 
-    // Set up metafication type table
-    // Characters that are "meta" need special handling
-    typtab['\0'] |= IMETA;
-    typtab[STOUC(Meta)] |= IMETA;
-    typtab[STOUC(Marker)] |= IMETA;
-    for (int t0 = (int)STOUC(Pound); t0 <= (int)STOUC(Nularg); t0++) {
-        typtab[t0] |= ITOK | IMETA;
-    }
+    // Initialize the full character type table (IBLANK, ISEP, IMETA, ITOK, etc.)
+    // This is critical: without it, space/tab aren't recognized as word separators
+    inittyptab();
 
     // Set up file descriptor table
     fdtable_size = zopenmax();
@@ -97,7 +92,6 @@ bool initializeLibzsh(const InitOptions& options) {
         init_parse();
 
         // Initialize history (needed for some operations)
-        strin = 1; // Reading from string, not interactive
         hbegin(0);
     }
 

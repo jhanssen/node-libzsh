@@ -46,27 +46,23 @@ void AstBuilder::skipCode(int count) {
 std::string AstBuilder::getString() {
     wordcode code = nextCode();
 
-    // String encoding in zsh wordcode:
-    // - Bit 0: contains tokens if set
-    // - Bits 1-0 == 11x: empty string
-    // - Bits 1-0 == 01x: short string (1-3 chars in upper bits)
-    // - Otherwise: offset into strs array
+    // String encoding in zsh wordcode (see parse.c ecstrcode/ecgetstr):
+    // - code == 6 or 7: empty string (bit 0 = has tokens)
+    // - code & 2 (bit 1 set): short string (1-3 chars at bits 3, 11, 19)
+    // - otherwise: long string, offset = code >> 2 into strs array
 
-    if ((code & 3) == 3) {
-        // Empty string marker
+    if (code == 6 || code == 7) {
         return "";
     }
 
-    if ((code & 3) == 1) {
-        // Short string - extract characters from upper bits
+    if (code & 2) {
+        // Short string - extract characters from bits 3, 11, 19
         char buf[4];
-        int len = 0;
-        unsigned int data = code >> 2;
-        while (data && len < 3) {
-            buf[len++] = static_cast<char>(data & 0xFF);
-            data >>= 8;
-        }
-        buf[len] = '\0';
+        buf[0] = static_cast<char>((code >>  3) & 0xff);
+        buf[1] = static_cast<char>((code >> 11) & 0xff);
+        buf[2] = static_cast<char>((code >> 19) & 0xff);
+        buf[3] = '\0';
+        int len = strlen(buf);
         return std::string(buf, len);
     }
 
@@ -534,11 +530,22 @@ Napi::Object AstBuilder::buildFor(wordcode code) {
     } else if (type == WC_FOR_PPARAM) {
         // for x in "$@"
         cmd.Set("style", "in");
-        cmd.Set("variable", getString());
+        // Read variable name count then names
+        wordcode numNames = nextCode();
+        if (numNames > 0) {
+            cmd.Set("variable", getString());
+            for (wordcode i = 1; i < numNames; i++) getString(); // skip extra names
+        }
     } else {
-        // for x in list
+        // for x in list (WC_FOR_LIST)
         cmd.Set("style", "in");
-        cmd.Set("variable", getString());
+        // Read variable name count then names
+        wordcode numNames = nextCode();
+        if (numNames > 0) {
+            cmd.Set("variable", getString());
+            for (wordcode i = 1; i < numNames; i++) getString(); // skip extra names
+        }
+        // Read list element count then elements
         wordcode numElements = nextCode();
         Napi::Array list = Napi::Array::New(env_);
         for (unsigned int i = 0; i < numElements; i++) {

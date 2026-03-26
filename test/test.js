@@ -183,7 +183,7 @@ test('validate valid syntax', () => {
 });
 
 test('validate invalid syntax', () => {
-    const result = libzsh.validate('if then else fi');
+    const result = libzsh.validate('do done');
     assertEqual(result.valid, false);
     assert(result.error, 'Should have error');
 });

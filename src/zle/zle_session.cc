@@ -17,9 +17,7 @@ extern char *zlelineasstring(ZLE_STRING_T instr, int inll, int incs,
                              int *outllp, int *outcsp, int useheap);
 extern ZLE_STRING_T stringaszleline(char *instr, int incs,
                                     int *outll, int *outsz, int *outcs);
-extern Keymap reference_keymap(Keymap km);
-extern void unref_keymap(Keymap km);
-extern int execzlewidget(Thingy thingy, char **args);
+extern int execzlefunc(Thingy func, char **args, int set_bindk, int set_lbindk);
 }
 
 // Flags for setline
@@ -122,26 +120,23 @@ ZLESession::ZLESession(const Napi::CallbackInfo& info)
         }
     }
 
-    // Set up keymap
+    // Set up keymap (keymaps are owned by the hash table, no ref-counting needed)
     Keymap km = openkeymap(const_cast<char*>(options.keymap.c_str()));
     if (km) {
-        impl_->keymap_ = reference_keymap(km);
+        impl_->keymap_ = km;
         selectkeymap(const_cast<char*>(options.keymap.c_str()), 0);
     } else {
         // Fall back to main keymap
         km = openkeymap(const_cast<char*>("main"));
         if (km) {
-            impl_->keymap_ = reference_keymap(km);
+            impl_->keymap_ = km;
             selectkeymap(const_cast<char*>("main"), 0);
         }
     }
 }
 
 ZLESession::~ZLESession() {
-    LIBZSH_LOCK();
-    if (impl_->keymap_) {
-        unref_keymap(impl_->keymap_);
-    }
+    // Keymaps are owned by the hash table, no cleanup needed
 }
 
 Napi::Value ZLESession::GetLine(const Napi::CallbackInfo& info) {
@@ -378,12 +373,7 @@ Napi::Value ZLESession::SetKeymap(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
 
-    // Release old keymap
-    if (impl_->keymap_) {
-        unref_keymap(impl_->keymap_);
-    }
-
-    impl_->keymap_ = reference_keymap(km);
+    impl_->keymap_ = km;
     selectkeymap(const_cast<char*>(name.c_str()), 0);
 
     return env.Undefined();
@@ -416,7 +406,7 @@ Napi::Value ZLESession::ExecuteWidget(const Napi::CallbackInfo& info) {
     }
 
     // Execute the widget
-    int ret = execzlewidget(t, nullptr);
+    int ret = execzlefunc(t, nullptr, 1, 0);
 
     Napi::Object result = Napi::Object::New(env);
     result.Set("success", ret == 0);
@@ -557,12 +547,7 @@ Napi::Value ZLESession::Destroy(const Napi::CallbackInfo& info) {
 
     if (!destroyed_) {
         LIBZSH_LOCK();
-
-        if (impl_->keymap_) {
-            unref_keymap(impl_->keymap_);
-            impl_->keymap_ = nullptr;
-        }
-
+        impl_->keymap_ = nullptr;
         destroyed_ = true;
     }
 

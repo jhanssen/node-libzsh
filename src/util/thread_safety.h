@@ -5,11 +5,13 @@
 
 namespace node_libzsh {
 
-// Global mutex for all libzsh operations since zsh uses global state
+// Global mutex for all libzsh operations since zsh uses global state.
+// Recursive because some public methods call other public methods
+// (e.g. registerCompleter calls unregisterCompleter).
 class LibzshMutex {
 public:
-    static std::mutex& get() {
-        static std::mutex mutex;
+    static std::recursive_mutex& get() {
+        static std::recursive_mutex mutex;
         return mutex;
     }
 
@@ -24,7 +26,7 @@ public:
         Guard& operator=(const Guard&) = delete;
 
     private:
-        std::lock_guard<std::mutex> lock_;
+        std::lock_guard<std::recursive_mutex> lock_;
     };
 };
 

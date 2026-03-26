@@ -12,15 +12,27 @@ extern "C" {
 extern Eprog parse_list(void);
 extern void freeeprog(Eprog p);
 extern void useeprog(Eprog p);
+extern Eprog dupeprog(Eprog p, int heap);
 extern char *getpermtext(Eprog prog, Wordcode c, int start_indent);
+extern void pushheap(void);
+extern void popheap(void);
+extern void inpop(void);
+extern char *zshlextext;
+extern void untokenize(char *s);
 }
 
 namespace node_libzsh {
 
 // Internal parse function
 static Eprog parseString(const std::string& input, std::string& error) {
-    // Make a mutable copy of the input
-    char* inputCopy = strdup(input.c_str());
+    // Append newline if not present (zsh parser expects terminated input)
+    std::string inputWithNl = input;
+    if (inputWithNl.empty() || inputWithNl.back() != '\n') {
+        inputWithNl += '\n';
+    }
+
+    // Make a mutable copy using zsh's allocator
+    char* inputCopy = strdup(inputWithNl.c_str());
     if (!inputCopy) {
         error = "Memory allocation failed";
         return nullptr;
@@ -28,29 +40,50 @@ static Eprog parseString(const std::string& input, std::string& error) {
 
     // Clear any previous error state
     errflag = 0;
-    noerrs = 0;
 
-    // Begin string input
+    // Suppress zsh's stderr error output (zwarn checks noerrs).
+    // We'll reconstruct the error message from parser state instead.
+    noerrs = 1;
+
+    // Use strinbeg before inpush — this order works correctly for all constructs.
+    // strinbeg initializes lexer state (hbegin, lexinit, init_parse_status).
+    pushheap();
     strinbeg(0);
-
-    // Push input string (INP_FREE = 1)
-    inpush(inputCopy, 1, NULL);
+    inpush(inputCopy, 0, NULL);
 
     // Parse the input
     Eprog prog = parse_list();
 
-    // End string input
-    strinend();
+    // parse_list returns a heap-allocated eprog; make a permanent copy
+    // before popheap() frees the heap
+    Eprog result = nullptr;
+    if (prog && !errflag) {
+        result = dupeprog(prog, 0);
+    }
 
-    if (!prog || errflag) {
-        error = "Parse error";
-        if (prog) {
-            freeeprog(prog);
+    // Capture error info before cleanup destroys parser state
+    std::string errorMsg;
+    if (!result && zshlextext) {
+        char* t = dupstring(zshlextext);
+        if (t) {
+            untokenize(t);
+            errorMsg = std::string("parse error near `") + t + "'";
         }
+    }
+
+    strinend();
+    inpop();
+    popheap();
+    free(inputCopy);
+    noerrs = 0;
+
+    if (!result) {
+        error = errorMsg.empty() ? "Parse error" : errorMsg;
+        errflag = 0;
         return nullptr;
     }
 
-    return prog;
+    return result;
 }
 
 Napi::Value Parse(const Napi::CallbackInfo& info) {
